@@ -1,30 +1,23 @@
-from sqlalchemy import Column, Integer, String, Boolean
+from sqlalchemy import Column, Integer, String, Boolean, DateTime
 from database import Base, engine
 
-class UserModel(Base):
-    __tablename__ = "user"
+class Cms_users(Base):
+    __tablename__ = "cms_users"
 
     id = Column(Integer, primary_key=True)
-    username = Column(String, unique=True)
-    email = Column(String, unique=True)
-    password = Column(String)
-    phno = Column(String, unique=True)
+    first_name = Column(String, unique=True, nullable=False)
+    last_name = Column(String, unique=True)
+    email = Column(String, unique=True, nullable=False)
+    emp_id = Column(String, unique=True)
+    password = Column(String, nullable=False)
+    role = Column(String, nullable=False)
+    phone = Column(String, unique=True, nullable=False)
     email_verified = Column(Boolean, default=False)
+    phone_verified = Column(Boolean, default=False)
+    created_at = Column(DateTime, nullable=False)
+    updated_at = Column(DateTime)
+    is_active = Column(Boolean, default=False)
     
-# Cms_users
-# 5.	ID (primary key)
-# 6.	First_name (mandatory)
-# 7.	Last_name (optional)
-# 8.	Email (mandatory)
-# 9.	Emp_id (optional)
-# 10.	Password (mandatory)
-# 11.	Role (mandatory)
-# 12.	Phone (mandatory)
-# 13.	Email_verified (mandatory)
-# 14.	Phone_verified (mandatory)
-# 15.	createdAt (mandatory)
-# 16.	updatedAt (optional)
-# 17.	is_active (mandatory)
 
 
 
