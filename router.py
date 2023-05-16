@@ -77,24 +77,25 @@ def get_user(user_id: str, db: Session = Depends(get_db)):
 def update_user(user_data: CmsUpdate, user_id: str, db: Session = Depends(get_db), token: str = Depends(oauth2_scheme)):   
     revoked_token = db.query(Revoked_tokens).filter_by(token=token).first()
     print(revoked_token)
-    if not revoked_token:
-        try:
-            user = db.query(Cms_users).filter(Cms_users.id == user_id).first()
-            if user is None:
-                raise HTTPException(status_code=404, detail="User not found")
-            user.first_name=user_data.first_name,
-            user.last_name=user_data.last_name,
-            user.email=user_data.email,
-            user.emp_id=user_data.emp_id,
-            user.role=user_data.role,
-            user.phone=user_data.phone
+    if revoked_token:
+        return {"message":"your token has expired"}
+    try:
+        user = db.query(Cms_users).filter(Cms_users.id == user_id).first()
+        if user is None:
+            raise HTTPException(status_code=404, detail="User not found")
+        user.first_name=user_data.first_name,
+        user.last_name=user_data.last_name,
+        user.email=user_data.email,
+        user.emp_id=user_data.emp_id,
+        user.role=user_data.role,
+        user.phone=user_data.phone
 
-            db.add(user)
-            db.commit()
-            return f"User with ID {user_id} has been updated."
-        except PyJWTError:
-            return {"message": "Invalid token"}
-    return {"message":"your token has expired"}
+        db.add(user)
+        db.commit()
+        return f"User with ID {user_id} has been updated."
+    except PyJWTError:
+        return {"message": "Invalid token"}
+    
 
 @router.delete("/users/{user_id}")
 def del_user(user_id: str, db: Session = Depends(get_db)):
