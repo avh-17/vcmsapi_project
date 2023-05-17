@@ -1,14 +1,11 @@
-from fastapi import Depends, FastAPI, HTTPException, Request
+from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
-from sqlalchemy.orm import Session
-from schemas import CmsBase, Settings
-import models
+from schemas import Settings
 from fastapi_jwt_auth import AuthJWT
 from fastapi_jwt_auth.exceptions import AuthJWTException
-from database import SessionLocal, engine, Base
+from database import engine, Base
 from router import router as my_router
 import uvicorn
-from pydantic import BaseModel
 
 Base.metadata.create_all(bind=engine)
 

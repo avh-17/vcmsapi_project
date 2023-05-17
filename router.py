@@ -1,21 +1,18 @@
-from fastapi import Depends, FastAPI, HTTPException, APIRouter, Header, requests, BackgroundTasks
-from fastapi.responses import JSONResponse
+import uuid, random
+from datetime import datetime, timedelta
+from fastapi import Depends, HTTPException, APIRouter
 from fastapi.encoders import jsonable_encoder
 from fastapi.security import OAuth2PasswordBearer
 from jwt import PyJWTError
-from fastapi_mail import FastMail, MessageSchema,ConnectionConfig, MessageType
 from sqlalchemy.orm import Session
-from schemas import CmsBase, CmsOTP, CmsLogin, CmsUpdate, TokenRevokeRequest
+from schemas import CmsBase, CmsLogin, CmsUpdate, CmsUpdatePassword 
 from fastapi_jwt_auth import AuthJWT
-from fastapi_jwt_auth.exceptions import AuthJWTException
-from models import Cms_users, Revoked_tokens
-from database import SessionLocal, engine
-import uvicorn, bcrypt, datetime, uuid, random, smtplib
+from models import Cms_users, Revoked_tokens, Otp_table, Token
+from database import SessionLocal
 from passlib.context import CryptContext
-from funcs import send_email
-from typing import List
-from pydantic import EmailStr, BaseModel
-from email.message import EmailMessage
+from funcs import mail
+from pydantic import EmailStr
+from fastapi_mail import FastMail, MessageSchema
 
 router = APIRouter()
 
@@ -73,15 +70,17 @@ def get_user(user_id: str, db: Session = Depends(get_db)):
         raise HTTPException(status_code=404, detail="User not found")
     return user
 
+# def update_user(user_data: CmsUpdate, user_id: str, db: Session = Depends(get_db), token: str = Depends(oauth2_scheme)):   
 @router.put("/users/{user_id}")
-def update_user(user_data: CmsUpdate, user_id: str, db: Session = Depends(get_db), token: str = Depends(oauth2_scheme)):   
+def update_user(user_data: CmsUpdate, user_id: str, token:str, db: Session = Depends(get_db)): 
     revoked_token = db.query(Revoked_tokens).filter_by(token=token).first()
-    print(revoked_token)
     if revoked_token:
-        return {"message":"your token has expired"}
+        raise HTTPException(status_code=404, detail="Your token has been revoked, please log in.")
     try:
         user = db.query(Cms_users).filter(Cms_users.id == user_id).first()
-        if user is None:
+        token = db.query(Token).filter(Token.access_token == token).first()
+
+        if user is None or token is None:
             raise HTTPException(status_code=404, detail="User not found")
         user.first_name=user_data.first_name,
         user.last_name=user_data.last_name,
@@ -107,27 +106,96 @@ def del_user(user_id: str, db: Session = Depends(get_db)):
     db.commit()
     return {f"User with ID {user_id} deleted."}
 
+
+
 @router.post("/login")
 def login(user_data: CmsLogin, db:Session=Depends(get_db), Authorize: AuthJWT = Depends()):
     user = db.query(Cms_users).filter(Cms_users.email == user_data.email).first()
     passw = user_data.password
 
     if user and verify_password(passw, user.password):
-            access_token = Authorize.create_access_token(subject=user.email)
-            refresh_token = Authorize.create_refresh_token(subject=user.email)
-            return {"access_token": access_token, "refresh_token": refresh_token}
-    return {"msg":"invalid credentials."}
+        access_token = Authorize.create_access_token(subject=user.email)
+        refresh_token = Authorize.create_refresh_token(subject=user.email)
+        token = db.query(Token).filter(Token.user_id == user.id).first()
+        print(token)
+        if token is None:
+            token = Token(
+                id = uuid.uuid4().hex,
+                access_token = access_token,
+                refresh_token = refresh_token,
+                user_id = user.id
+            )
+        token.access_token = access_token,
+        token.refresh_token = refresh_token,
+        db.add(token)
+        db.commit()
+        return {"access_token": access_token, "refresh_token": refresh_token}
+    raise HTTPException(status_code=404, detail="Invalid credentials.")
 
 @router.post("/logout")
-def logout(user:TokenRevokeRequest, db:Session=Depends(get_db), token: str = Depends(oauth2_scheme)):
+def logout(token: str, db:Session=Depends(get_db)):
     revoked_token = Revoked_tokens(
         id=uuid.uuid4().hex,
-        token=user.token
+        token=token
     )
     db.add(revoked_token)
     db.commit()
 
-    return {"Message":"You have logged out."}
+    return {"message":"you have logged out."}
+
+@router.put("/forgotpassword")
+def forgotpassword(user_otp: str, user_data: CmsUpdatePassword, db:Session=Depends(get_db)):
+    otpuser = db.query(Otp_table).filter(Otp_table.otp_code==user_otp).first()
+    user = db.query(Cms_users).filter(Cms_users.id==otpuser.user_id).first()
+    if user:
+        user.password = get_password_hash(user_data.password)
+
+    db.add(user)
+    db.commit()
+    return {"msg":"user password updated."}
+
+@router.get('/sendotp')
+def send_email_otp(email: str, db: Session = Depends(get_db)):
+    user = db.query(Cms_users).filter_by(email=email).first()
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+
+    otp = random.randint(100000, 999999)
+    otp_user = db.query(Otp_table).filter(Otp_table.user_id==user.id).first()
+    
+    if otp_user is None:
+        otp_user = Otp_table(
+            id=uuid.uuid4().hex,
+            user_id=user.id,
+            phone_code=otp,
+            phone_number=user.phone,
+            email=user.email,
+            otp_code=otp,
+            expiry_date = datetime.utcnow()+timedelta(minutes=5),
+            no_of_attempts=0
+        )
+    otp_user.phone_code=otp,
+    otp_user.otp_code=otp,
+    otp_user.expiry_date = datetime.utcnow()+timedelta(minutes=5),
+    otp_user.no_of_attempts+=1
+    db.add(otp_user)
+    db.commit()
+
+    try:
+        message = MessageSchema(
+            subject="OTP for reset password",
+            recipients=[email],
+            body=str(otp),
+            subtype="html"  # Optional: specify the subtype as needed
+        )
+        mail.send_message(message)
+    except Exception as e:
+        return f'Error sending email: {str(e)}', 500
+
+    return f'OTP sent successfully! {otp}'
+
+
+    
     
 
 

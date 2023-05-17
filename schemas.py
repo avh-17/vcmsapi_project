@@ -31,11 +31,8 @@ class CmsLogin(BaseModel):
     email: constr(regex=regex)
     password: constr(regex=pass_regex)
 
-class CmsOTP(BaseModel):
-    otp = int
+class CmsUpdatePassword(BaseModel):
+    password: constr(regex=pass_regex)
 
 class EmailSchema(BaseModel):
     email: List[EmailStr]
-
-class TokenRevokeRequest(BaseModel):
-    token: str
