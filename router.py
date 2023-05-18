@@ -1,40 +1,16 @@
 import uuid, random
 from datetime import datetime, timedelta
 from fastapi import Depends, HTTPException, APIRouter, status
-from fastapi.encoders import jsonable_encoder
-from fastapi.security import OAuth2PasswordBearer,OAuth2PasswordRequestForm
+from fastapi.security import OAuth2PasswordRequestForm
 from jwt import PyJWTError
 from sqlalchemy.orm import Session
-from schemas import CmsBase, CmsLogin, CmsUpdate, CmsUpdatePassword 
-from fastapi_jwt_auth import AuthJWT
-from models import Cms_users, Revoked_tokens, Otp_table, Token
+from schemas import CmsBase, CmsUpdate, CmsUpdatePassword
+from models import Cms_users, Otp_table, Token
 from database import SessionLocal
-from passlib.context import CryptContext
-from funcs import mail
+from funcs import get_db, get_password_hash, oauth2_scheme, verify_password, ACCESS_TOKEN_EXPIRE_MINUTES, create_access_token, send_email
 from typing import Annotated
-from pydantic import EmailStr
-from jose import JWTError, jwt
-from fastapi_mail import FastMail, MessageSchema
 
 router = APIRouter()
-
-
-pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
-
-def verify_password(plain_password, hashed_password):
-    return pwd_context.verify(plain_password, hashed_password)
-
-def get_password_hash(password):
-    return pwd_context.hash(password)
-
-oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/login")
-
-def get_db():
-    try:
-        db = SessionLocal()
-        yield db
-    finally:
-        db.close()
 
 @router.post("/register")
 def create_user(user: CmsBase, db: Session = Depends(get_db)):
@@ -72,22 +48,10 @@ def get_user(user_id: str, db: Session = Depends(get_db)):
         raise HTTPException(status_code=404, detail="User not found")
     return user
 
-# def update_user(user_data: CmsUpdate, user_id: str, db: Session = Depends(get_db), token: str = Depends(oauth2_scheme)):   
 @router.put("/users/{user_id}")
-def update_user(user_data: CmsUpdate, user_id: str, token:str, db: Session = Depends(get_db)): 
-    user_token = db.query(Token).filter(Token.access_token==token).first()
-    revoked_token = db.query(Revoked_tokens).filter_by(token=token).first()
-    if datetime.utcnow() >= user_token.expiry_time:
-        user_token.is_expired=True
-        db.add(user_token)
-        db.commit()
-        raise HTTPException(status_code=400, detail="your access token has expired.")
-    if revoked_token:
-        raise HTTPException(status_code=400, detail="your access token has been revoked, please log in.")
+def update_user(user_data: CmsUpdate, user_id: str, token: Annotated[str, Depends(oauth2_scheme)], db: Session = Depends(get_db)): 
     try:
-        
         user = db.query(Cms_users).filter(Cms_users.id == user_id).first()
-        token = db.query(Token).filter(Token.access_token == token).first()
 
         if user is None or token is None:
             raise HTTPException(status_code=404, detail="User not found")
@@ -116,16 +80,7 @@ def update_user(user_data: CmsUpdate, user_id: str, token:str, db: Session = Dep
     
 
 @router.delete("/users/{user_id}")
-def del_user(user_id: str, token: str, db: Session = Depends(get_db)):
-    user_token = db.query(Token).filter(Token.access_token==token).first()
-    revoked_token = db.query(Revoked_tokens).filter_by(token=token).first()
-    if datetime.utcnow() >= user_token.expiry_time:
-        user_token.is_expired=True
-        db.add(user_token)
-        db.commit()
-        raise HTTPException(status_code=400, detail="your access token has expired.") 
-    if revoked_token:
-        raise HTTPException(status_code=400, detail="your access token has been revoked, please log in.")
+def del_user(user_id: str, token: Annotated[str, Depends(oauth2_scheme)], db: Session = Depends(get_db)):
     user = db.query(Cms_users).get(user_id)
     if user is None:
         raise HTTPException(status_code=404, detail="User not found")
@@ -143,55 +98,30 @@ def del_user(user_id: str, token: str, db: Session = Depends(get_db)):
         }
 
 @router.post("/login")
-def login(user_data: CmsLogin, db:Session=Depends(get_db), Authorize: AuthJWT = Depends()):
-    user = db.query(Cms_users).filter(Cms_users.email == user_data.email).first()
-    passw = user_data.password
-
-    if user and verify_password(passw, user.password):
-        access_token = Authorize.create_access_token(subject=user.email)
-        refresh_token = Authorize.create_refresh_token(subject=user.email)
-        token = db.query(Token).filter(Token.user_id == user.id).first()
-        print(token)
-        if token is None:
-            token = Token(
-                id = uuid.uuid4().hex,
-                access_token = access_token,
-                refresh_token = refresh_token,
-                expiry_time = datetime.utcnow()+timedelta(minutes=5),
-                user_id = user.id
-            )
-        token.access_token = access_token
-        token.refresh_token = refresh_token
-        token.expiry_time = datetime.utcnow()+timedelta(minutes=5)
-        user.is_active = True
-        db.add(token)
-        db.add(user)
-        db.commit()
-        return {"access_token": access_token, "refresh_token": refresh_token}
-    raise HTTPException(status_code=404, detail="Invalid credentials.")
-
-@router.post("/logout")
-def logout(token: str, user_id:str, db:Session=Depends(get_db)):
-    revoked_token = Revoked_tokens(
-        id=uuid.uuid4().hex,
-        token=token
+async def login_for_access_token(
+    form_data: Annotated[OAuth2PasswordRequestForm, Depends()], db:Session=Depends(get_db)
+):
+    user = db.query(Cms_users).filter(Cms_users.email==form_data.username).first()
+    if not user:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Incorrect username or password",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+    if not verify_password(form_data.password, user.password):
+        return False
+    access_token_expires = timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
+    access_token = create_access_token(
+        data={"sub": user.email}, expires_delta=access_token_expires
     )
-    user=db.query(Cms_users).filter(Cms_users.id==user_id).first()
-    user.is_active=False
-    db.add(user)
-    db.add(revoked_token)
+    token = Token(
+        id=uuid.uuid4().hex,
+        access_token=access_token,
+        user_id=user.id
+    )
+    db.add(token)
     db.commit()
-
-    return {
-            "response": {
-                "code": 200,
-                "status": "success",
-                "alert": [{
-                    "message": "you have logged out.",
-                    "type": "log out",
-                }]
-            }
-        }
+    return {"access_token": access_token, "token_type": "bearer"}
 
 @router.put("/forgotpassword")
 def forgotpassword(user_otp: str, user_data: CmsUpdatePassword, db:Session=Depends(get_db)):
@@ -248,17 +178,8 @@ def send_email_otp(email: str, db: Session = Depends(get_db)):
     db.add(otp_user)
     db.commit()
 
-    try:
-        message = MessageSchema(
-            subject="OTP for reset password",
-            recipients=[email],
-            body=str(otp),
-            subtype="html"
-        )
-        mail.send_message(message)
-    except Exception as e:
-        return f'Error sending email: {str(e)}', 500
-
+    send_email("Email verification OTP",str(otp),"nicemltstng@outlook.com", user.email)
+   
     return {
             "response": {
                 "code": 200,

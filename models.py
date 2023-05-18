@@ -1,7 +1,7 @@
 from sqlalchemy import Column, Integer, String, Boolean, DateTime, ForeignKey
 from sqlalchemy.sql import func
 from sqlalchemy.orm import relationship
-from database import Base, engine
+from database import Base
 
 class Cms_users(Base):
     __tablename__ = "cms_users"
@@ -27,10 +27,7 @@ class Token(Base):
     id = Column(String, primary_key=True)
     device_id = Column(String, unique=True)
     access_token = Column(String)
-    refresh_token = Column(String)
     user_id = Column(String, ForeignKey('cms_users.id'), nullable=False)
-    expiry_time = Column(DateTime)
-    is_expired = Column(Boolean, nullable=False, default=False)
     cms_user = relationship(Cms_users)
 
 class Otp_table(Base):
@@ -44,10 +41,5 @@ class Otp_table(Base):
     expiry_date = Column(DateTime)
     no_of_attempts = Column(Integer, nullable=False)
     is_expired = Column(Boolean, nullable=False, default=False)
-
-class Revoked_tokens(Base):
-    __tablename__ = "revoked_tokens"
-    id = Column(String, primary_key=True)
-    token = Column(String, nullable=False)
 
 
