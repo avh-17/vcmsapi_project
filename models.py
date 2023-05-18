@@ -7,6 +7,7 @@ class Cms_users(Base):
     __tablename__ = "cms_users"
 
     id = Column(String, primary_key=True)
+    
     first_name = Column(String, unique=True, nullable=False)
     last_name = Column(String, unique=True)
     email = Column(String, unique=True, nullable=False)
@@ -28,6 +29,8 @@ class Token(Base):
     access_token = Column(String)
     refresh_token = Column(String)
     user_id = Column(String, ForeignKey('cms_users.id'), nullable=False)
+    expiry_time = Column(DateTime)
+    is_expired = Column(Boolean, nullable=False, default=False)
     cms_user = relationship(Cms_users)
 
 class Otp_table(Base):
@@ -44,7 +47,7 @@ class Otp_table(Base):
 
 class Revoked_tokens(Base):
     __tablename__ = "revoked_tokens"
-    id = Column(Integer, primary_key=True)
+    id = Column(String, primary_key=True)
     token = Column(String, nullable=False)
 
 

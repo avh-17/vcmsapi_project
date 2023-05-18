@@ -34,5 +34,6 @@ class CmsLogin(BaseModel):
 class CmsUpdatePassword(BaseModel):
     password: constr(regex=pass_regex)
 
+
 class EmailSchema(BaseModel):
     email: List[EmailStr]

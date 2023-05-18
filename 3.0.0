@@ -1,0 +1,13 @@
+Collecting python-jose
+  Downloading python_jose-3.3.0-py2.py3-none-any.whl (33 kB)
+Collecting ecdsa!=0.15
+  Downloading ecdsa-0.18.0-py2.py3-none-any.whl (142 kB)
+     ------------------------------------ 142.9/142.9 kB 605.8 kB/s eta 0:00:00
+Collecting rsa
+  Downloading rsa-4.9-py3-none-any.whl (34 kB)
+Collecting pyasn1
+  Downloading pyasn1-0.5.0-py2.py3-none-any.whl (83 kB)
+     ---------------------------------------- 83.9/83.9 kB 4.6 MB/s eta 0:00:00
+Requirement already satisfied: six>=1.9.0 in d:\python_course\vcmsapi_project\env\lib\site-packages (from ecdsa!=0.15->python-jose) (1.16.0)
+Installing collected packages: pyasn1, ecdsa, rsa, python-jose
+Successfully installed ecdsa-0.18.0 pyasn1-0.5.0 python-jose-3.3.0 rsa-4.9
