@@ -1,4 +1,5 @@
 from sqlalchemy import Column, Integer, String, Boolean, DateTime, ForeignKey
+from sqlalchemy.dialects import postgresql
 from sqlalchemy.sql import func
 from sqlalchemy.orm import relationship
 from database import Base
@@ -13,7 +14,7 @@ class Cms_users(Base):
     email = Column(String, unique=True, nullable=False)
     emp_id = Column(String, unique=True)
     password = Column(String, nullable=False)
-    role = Column(String, nullable=False)
+    role = Column(String, default="subscriber")
     phone = Column(String, unique=True, nullable=False)
     email_verified = Column(Boolean, default=False)
     phone_verified = Column(Boolean, default=False)
@@ -42,4 +43,19 @@ class Otp_table(Base):
     no_of_attempts = Column(Integer, nullable=False)
     is_expired = Column(Boolean, nullable=False, default=False)
 
+class User_roles(Base):
+    __tablename__ = "user_roles"
 
+    id = Column(String, primary_key=True)
+    role_name = Column(String, nullable=False)
+    permissions = Column(postgresql.ARRAY(String), nullable=False)
+    status = Column(Boolean, default=True)
+
+class User_permissions(Base):
+    __tablename__ = "user_permissions"
+
+    id = Column(String, primary_key=True)
+    permission_name = Column(String, nullable=False)
+    permission_type = Column(String, nullable=False)
+    collection = Column(postgresql.ARRAY(String), nullable=False)
+    status=Column(Boolean, default=False)

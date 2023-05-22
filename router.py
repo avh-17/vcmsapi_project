@@ -4,10 +4,10 @@ from fastapi import Depends, HTTPException, APIRouter, status
 from fastapi.security import OAuth2PasswordRequestForm
 from jwt import PyJWTError
 from sqlalchemy.orm import Session
-from schemas import CmsBase, CmsUpdate, CmsUpdatePassword
-from models import Cms_users, Otp_table, Token
+from schemas import CmsBase, CmsUpdate, CmsUpdatePassword, RoleSchema, PermissionSchema
+from models import Cms_users, Otp_table, Token, User_roles, User_permissions
 from database import SessionLocal
-from funcs import get_db, get_password_hash, oauth2_scheme, verify_password, ACCESS_TOKEN_EXPIRE_MINUTES, create_access_token, send_email
+from funcs import get_db, get_password_hash, verify_password, create_access_token, send_email, oauth2_scheme, ACCESS_TOKEN_EXPIRE_MINUTES
 from typing import Annotated
 
 router = APIRouter()
@@ -24,6 +24,10 @@ def create_user(user: CmsBase, db: Session = Depends(get_db)):
         role=user.role,
         phone=user.phone
     )
+    user_role = db.query(User_roles).filter_by(role_name=db_user.role).first()
+
+    if user_role and not user_role.status:
+        raise HTTPException(status_code=404, detail="Please set a different user role")
     db.add(db_user)
     db.commit()
     return {
@@ -95,7 +99,7 @@ def del_user(user_id: str, token: Annotated[str, Depends(oauth2_scheme)], db: Se
                     "type": "delete",
                 }]
             }
-        }
+    }
 
 @router.post("/login")
 async def login_for_access_token(
@@ -148,7 +152,7 @@ def forgotpassword(user_otp: str, user_data: CmsUpdatePassword, db:Session=Depen
                     "type": "update",
                 }]
             }
-        }
+    }
 
 @router.get('/sendotp')
 def send_email_otp(email: str, db: Session = Depends(get_db)):
@@ -188,9 +192,9 @@ def send_email_otp(email: str, db: Session = Depends(get_db)):
                     "message": f"otp {otp} sent."
                 }]
             }
-        }
+    }
 
-@router.put("/verifyuser/")
+@router.put("/verifyuser")
 def verifyuser(user_otp: str, db: Session = Depends(get_db)):
     otpuser = db.query(Otp_table).filter(Otp_table.otp_code==user_otp).first()
     user = db.query(Cms_users).filter(Cms_users.id==otpuser.user_id).first()
@@ -214,14 +218,145 @@ def verifyuser(user_otp: str, db: Session = Depends(get_db)):
                     "message": "email and phone verified."
                 }]
             }
-        }
+    }
 
+@router.post("/roles")
+def add_role(role_data: RoleSchema,token: Annotated[str, Depends(oauth2_scheme)], db: Session = Depends(get_db)):
+    user_role = db.query(User_roles).filter_by(role_name=role_data.role_name).first()
+    if user_role:
+        raise HTTPException(status_code=400, detail="This role already exists.")
+    role = User_roles(
+        id = uuid.uuid4().hex,
+        role_name = role_data.role_name,
+        permissions = role_data.permissions,
+        status = role_data.status
+    )
+    db.add(role)
+    db.commit()
+    return {
+            "response": {
+                "code": 200,
+                "status": "success",
+                "alert": [{
+                    "message": "new user role added."
+                }]
+            }
+    }
 
+@router.get("/getroles")
+def get_roles(db: Session = Depends(get_db)):
+    return db.query(User_roles).all()
+
+@router.delete("/deleterole")
+def del_role(role_id: str,token: Annotated[str, Depends(oauth2_scheme)], db: Session = Depends(get_db)):
+    role=db.query(User_roles).filter_by(id=role_id).first()
+    if not role:
+        raise HTTPException(status_code=400, detail="This role was not found.")
+    if "delete role" not in role.permissions:
+        raise HTTPException(status_code=400, detail="User with this role cannot delete roles.")
+    db.delete(role)
+    db.commit()
+    return {
+            "response": {
+                "code": 200,
+                "status": "success",
+                "alert": [{
+                    "message": f"role id {role_id} has been deleted."
+                }]
+            }
+    }
+
+@router.put("/updaterole")
+def update_role(role_id: str, role_data:RoleSchema,token: Annotated[str, Depends(oauth2_scheme)], db: Session = Depends(get_db)):
+    role=db.query(User_roles).filter_by(id=role_id).first()
+    if not role:
+        raise HTTPException(status_code=400, detail="This role was not found.")
+    role.role_name = role_data.role_name
+    role.permissions = role_data.permissions
+    role.status = role_data.status
+
+    db.add(role)
+    db.commit()
+    return {
+            "response": {
+                "code": 200,
+                "status": "success",
+                "alert": [{
+                    "message": f"role id {role_id} has been updated."
+                }]
+            }
+    } 
     
+@router.post("/perm")
+def add_permissions(permission_data: PermissionSchema,token: Annotated[str, Depends(oauth2_scheme)], db: Session = Depends(get_db)):
+    user_permissions = db.query(User_permissions).filter_by(permission_name=permission_data.permission_name).first()
+    if user_permissions:
+        raise HTTPException(status_code=400, detail="This user permission already exists.")
+
+    user_permissions = User_permissions(
+        id=uuid.uuid4().hex,
+        permission_name = permission_data.permission_name,
+        permission_type = permission_data.permission_type,
+        collection = permission_data.collection,
+        status = permission_data.status
+    )
+    db.add(user_permissions)
+    db.commit()
+    return {
+            "response": {
+                "code": 200,
+                "status": "success",
+                "alert": [{
+                    "message": "new user permissions added."
+                }]
+            }
+    }
+
+@router.get("/getperm")
+def get_permissions(db: Session = Depends(get_db)):
+    return db.query(User_permissions).all()
+
+router.delete("/deleteperm")
+def del_permissions(perm_id: str,token: Annotated[str, Depends(oauth2_scheme)], db: Session = Depends(get_db)):
+    user_perm = db.query(User_permissions).filter_by(id=perm_id).first()
+    if not user_perm:
+        raise HTTPException(status_code=400, detail="This user permission was not found.")
+    db.delete(user_perm)
+    db.commit()
+
+    return {
+            "response": {
+                "code": 200,
+                "status": "success",
+                "alert": [{
+                    "message": f"user permissions id {perm_id} deleted."
+                }]
+            }
+    }
+
+router.put("/updateperm")
+def update_permissions(perm_id: str, perm_data: PermissionSchema,token: Annotated[str, Depends(oauth2_scheme)], db: Session = Depends(get_db)):
+    user_perm = db.query(User_permissions).filter_by(id=perm_id).first()
+
+    if not user_perm:
+        raise HTTPException(status_code=400, detail="This user permission was not found.")
     
+    user_perm.permission_name = perm_data.permission_name
+    user_perm.permission_type = perm_data.permission_type
+    user_perm.collection = perm_data.collection
 
+    db.add(user_perm)
+    db.commit()
 
-
+    return {
+            "response": {
+                "code": 200,
+                "status": "success",
+                "alert": [{
+                    "message": f"user permissions id {perm_id} updated."
+                }]
+            }
+    }
 
 
 
