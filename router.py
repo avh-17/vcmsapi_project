@@ -323,39 +323,36 @@ def update_permissions(perm_id: str, perm_data: PermissionSchema, token: Annotat
     }
 
 @router.put("/updatestatus")
-def update_status(user_ids: List[str], users_data: UpdateStatusSchema, bulk: bool, db: Session = Depends(get_db)):
+def update_status(users_data: List[UpdateStatusSchema], bulk: bool, token: Annotated[str, Depends(oauth2_scheme)], db: Session = Depends(get_db)):
     if bulk:
-        for user_id, i_active, i_role in zip(user_ids, users_data.is_active, users_data.role):
-            user = db.query(Cms_users).filter_by(id=user_id).first()
+        for user_data in users_data:
+            user = db.query(Cms_users).filter_by(id=user_data.id).first()
             if not user:
                 raise HTTPException(status_code=400, detail="user not found.")
              
-            user.is_active = i_active
-            user.role = i_role
+            user.is_active = user_data.is_active
+            user.role = user_data.role
 
             db.add(user)
             db.commit()
 
-            return{
-                    "response": {
-                        "code": 200,
-                        "status": "success",
-                        "alert": [{
-                            "message": f"user ids {user_ids} updated."
-                        }]
-                    }
-            }
-    user_id = ''.join(user_ids)
-    user = db.query(Cms_users).filter_by(id=user_id).first()
+        return{
+                "response": {
+                    "code": 200,
+                    "status": "success",
+                    "alert": [{
+                        "message": f"multiple user ids updated."
+                    }]
+                }
+        }
+        
+    user = db.query(Cms_users).filter_by(id=users_data[0].id).first()
     if not user:
         raise HTTPException(status_code=400, detail="user not found.")
-    for user_active in users_data.is_active:
-        i_active = user_active
-    for user_role in users_data.role:
-        i_role = user_role
     
-    user.role = i_active
-    user.role = i_role
+    user.is_active = users_data[0].is_active
+    user.role = users_data[0].role
+
     db.add(user)
     db.commit()
     return{
@@ -363,7 +360,7 @@ def update_status(user_ids: List[str], users_data: UpdateStatusSchema, bulk: boo
                 "code": 200,
                 "status": "success",
                 "alert": [{
-                    "message": f"user id {user_id} updated."
+                    "message": f"user id {user.id} updated."
                 }]
             }
     }

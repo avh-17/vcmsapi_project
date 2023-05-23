@@ -75,5 +75,6 @@ class PermissionSchema(BaseModel):
    status: bool
 
 class UpdateStatusSchema(BaseModel):
-    is_active: List[bool]
-    role: List[str]
+    id: str
+    is_active: bool
+    role: str
