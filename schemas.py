@@ -73,3 +73,7 @@ class PermissionSchema(BaseModel):
    permission_type: str 
    collection: List[str]
    status: bool
+
+class UpdateStatusSchema(BaseModel):
+    is_active: List[bool]
+    role: List[str]

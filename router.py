@@ -1,10 +1,11 @@
 import uuid, random
+from typing import List
 from datetime import datetime, timedelta
 from fastapi import Depends, HTTPException, APIRouter, status
 from fastapi.security import OAuth2PasswordRequestForm
 from jwt import PyJWTError
 from sqlalchemy.orm import Session
-from schemas import CmsBase, CmsUpdate, CmsUpdatePassword, RoleSchema, PermissionSchema
+from schemas import CmsBase, CmsUpdate, CmsUpdatePassword, RoleSchema, PermissionSchema, UpdateStatusSchema
 from models import Cms_users, Otp_table, Token, User_roles, User_permissions
 from database import SessionLocal
 from funcs import get_db, get_password_hash, verify_password, create_access_token, send_email, oauth2_scheme, ACCESS_TOKEN_EXPIRE_MINUTES
@@ -247,25 +248,6 @@ def add_role(role_data: RoleSchema,token: Annotated[str, Depends(oauth2_scheme)]
 def get_roles(db: Session = Depends(get_db)):
     return db.query(User_roles).all()
 
-@router.delete("/deleterole")
-def del_role(role_id: str,token: Annotated[str, Depends(oauth2_scheme)], db: Session = Depends(get_db)):
-    role=db.query(User_roles).filter_by(id=role_id).first()
-    if not role:
-        raise HTTPException(status_code=400, detail="This role was not found.")
-    if "delete role" not in role.permissions:
-        raise HTTPException(status_code=400, detail="User with this role cannot delete roles.")
-    db.delete(role)
-    db.commit()
-    return {
-            "response": {
-                "code": 200,
-                "status": "success",
-                "alert": [{
-                    "message": f"role id {role_id} has been deleted."
-                }]
-            }
-    }
-
 @router.put("/updaterole")
 def update_role(role_id: str, role_data:RoleSchema,token: Annotated[str, Depends(oauth2_scheme)], db: Session = Depends(get_db)):
     role=db.query(User_roles).filter_by(id=role_id).first()
@@ -316,26 +298,8 @@ def add_permissions(permission_data: PermissionSchema,token: Annotated[str, Depe
 def get_permissions(db: Session = Depends(get_db)):
     return db.query(User_permissions).all()
 
-router.delete("/deleteperm")
-def del_permissions(perm_id: str,token: Annotated[str, Depends(oauth2_scheme)], db: Session = Depends(get_db)):
-    user_perm = db.query(User_permissions).filter_by(id=perm_id).first()
-    if not user_perm:
-        raise HTTPException(status_code=400, detail="This user permission was not found.")
-    db.delete(user_perm)
-    db.commit()
-
-    return {
-            "response": {
-                "code": 200,
-                "status": "success",
-                "alert": [{
-                    "message": f"user permissions id {perm_id} deleted."
-                }]
-            }
-    }
-
 router.put("/updateperm")
-def update_permissions(perm_id: str, perm_data: PermissionSchema,token: Annotated[str, Depends(oauth2_scheme)], db: Session = Depends(get_db)):
+def update_permissions(perm_id: str, perm_data: PermissionSchema, token: Annotated[str, Depends(oauth2_scheme)], db: Session = Depends(get_db)):
     user_perm = db.query(User_permissions).filter_by(id=perm_id).first()
 
     if not user_perm:
@@ -357,6 +321,54 @@ def update_permissions(perm_id: str, perm_data: PermissionSchema,token: Annotate
                 }]
             }
     }
+
+@router.put("/updatestatus")
+def update_status(user_ids: List[str], users_data: UpdateStatusSchema, bulk: bool, db: Session = Depends(get_db)):
+    if bulk:
+        for user_id, i_active, i_role in zip(user_ids, users_data.is_active, users_data.role):
+            user = db.query(Cms_users).filter_by(id=user_id).first()
+            if not user:
+                raise HTTPException(status_code=400, detail="user not found.")
+             
+            user.is_active = i_active
+            user.role = i_role
+
+            db.add(user)
+            db.commit()
+
+            return{
+                    "response": {
+                        "code": 200,
+                        "status": "success",
+                        "alert": [{
+                            "message": f"user ids {user_ids} updated."
+                        }]
+                    }
+            }
+    user_id = ''.join(user_ids)
+    user = db.query(Cms_users).filter_by(id=user_id).first()
+    if not user:
+        raise HTTPException(status_code=400, detail="user not found.")
+    for user_active in users_data.is_active:
+        i_active = user_active
+    for user_role in users_data.role:
+        i_role = user_role
+    
+    user.role = i_active
+    user.role = i_role
+    db.add(user)
+    db.commit()
+    return{
+            "response": {
+                "code": 200,
+                "status": "success",
+                "alert": [{
+                    "message": f"user id {user_id} updated."
+                }]
+            }
+    }
+   
+            
 
 
 
