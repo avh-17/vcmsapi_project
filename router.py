@@ -15,6 +15,7 @@ router = APIRouter()
 
 @router.post("/register")
 def create_user(user: CmsBase, db: Session = Depends(get_db)):
+    
     db_user = Cms_users(
         id = uuid.uuid4().hex,
         first_name=user.first_name,
@@ -29,6 +30,12 @@ def create_user(user: CmsBase, db: Session = Depends(get_db)):
 
     if user_role and not user_role.status:
         raise HTTPException(status_code=404, detail="Please set a different user role")
+    if "add_user" not in user_role.permissions:
+        raise HTTPException(status_code=404, detail="You are not allowed to add user")
+    if user_role.role_name=="super_admin":
+        user_role.status=False
+        db.add(user_role)
+        db.commit()
     db.add(db_user)
     db.commit()
     return {
@@ -43,11 +50,11 @@ def create_user(user: CmsBase, db: Session = Depends(get_db)):
     }
 
 @router.get("/users")
-def get_users(db: Session = Depends(get_db)):
+def get_users(token: Annotated[str, Depends(oauth2_scheme)], db: Session = Depends(get_db)):
     return db.query(Cms_users).all()
  
 @router.get("/users/{user_id}")
-def get_user(user_id: str, db: Session = Depends(get_db)):
+def get_user(user_id: str, token: Annotated[str, Depends(oauth2_scheme)], db: Session = Depends(get_db)):
     user = db.query(Cms_users).filter(Cms_users.id == user_id).first()
     if user is None:
         raise HTTPException(status_code=404, detail="User not found")
@@ -55,18 +62,29 @@ def get_user(user_id: str, db: Session = Depends(get_db)):
 
 @router.put("/users/{user_id}")
 def update_user(user_data: CmsUpdate, user_id: str, token: Annotated[str, Depends(oauth2_scheme)], db: Session = Depends(get_db)): 
+    
     try:
         user = db.query(Cms_users).filter(Cms_users.id == user_id).first()
 
         if user is None or token is None:
             raise HTTPException(status_code=404, detail="User not found")
+        
+        user_role = db.query(User_roles).filter_by(role_name=user.role).first()
+        if "update_user" not in user_role.permissions:
+            raise HTTPException(status_code=404, detail="You are not allowed to update your credentials.")
+        
         user.first_name=user_data.first_name,
         user.last_name=user_data.last_name,
         user.email=user_data.email,
         user.emp_id=user_data.emp_id,
+        if user.role and not user_role.status:
+            raise HTTPException(status_code=404, detail="Please set a different user role")
         user.role=user_data.role,
         user.phone=user_data.phone
-
+        if user_role.role_name=="super_admin":
+            user_role.status=False
+            db.add(user_role)
+            db.commit()
         db.add(user)
         db.commit()
         return {
@@ -89,6 +107,9 @@ def del_user(user_id: str, token: Annotated[str, Depends(oauth2_scheme)], db: Se
     user = db.query(Cms_users).get(user_id)
     if user is None:
         raise HTTPException(status_code=404, detail="User not found")
+    user_role = db.query(User_roles).filter_by(role_name=user.role).first()
+    if "delete_user" not in user_role.permissions:
+        raise HTTPException(status_code=404, detail="You are not allowed to delete user.")
     db.delete(user)
     db.commit()
     return {
@@ -131,8 +152,10 @@ async def login_for_access_token(
 @router.put("/forgotpassword")
 def forgotpassword(user_otp: str, user_data: CmsUpdatePassword, db:Session=Depends(get_db)):
     otpuser = db.query(Otp_table).filter(Otp_table.otp_code==user_otp).first()
-    print(otpuser)
     user = db.query(Cms_users).filter(Cms_users.id==otpuser.user_id).first()
+    user_role = db.query(User_roles).filter_by(role_name=user.role).first()
+    if "update_user" not in user_role.permissions:
+        raise HTTPException(status_code=404, detail="You are not allowed to update password.")
     if datetime.utcnow() >= otpuser.expiry_date:
         otpuser.is_expired=True
         db.add(otpuser)
@@ -196,9 +219,12 @@ def send_email_otp(email: str, db: Session = Depends(get_db)):
     }
 
 @router.put("/verifyuser")
-def verifyuser(user_otp: str, db: Session = Depends(get_db)):
+def verifyuser(user_otp: str, token: Annotated[str, Depends(oauth2_scheme)], db: Session = Depends(get_db)):
     otpuser = db.query(Otp_table).filter(Otp_table.otp_code==user_otp).first()
     user = db.query(Cms_users).filter(Cms_users.id==otpuser.user_id).first()
+    user_role = db.query(User_roles).filter_by(role_name=user.role).first()
+    if "verify_user" not in user_role.permissions:
+        raise HTTPException(status_code=404, detail="You are not allowed to verify user.")
     if datetime.utcnow() >= otpuser.expiry_date:
         otpuser.is_expired=True
         db.add(otpuser)
@@ -222,10 +248,12 @@ def verifyuser(user_otp: str, db: Session = Depends(get_db)):
     }
 
 @router.post("/roles")
-def add_role(role_data: RoleSchema,token: Annotated[str, Depends(oauth2_scheme)], db: Session = Depends(get_db)):
+def add_role(role_data: RoleSchema, token: Annotated[str, Depends(oauth2_scheme)], db: Session = Depends(get_db)):
     user_role = db.query(User_roles).filter_by(role_name=role_data.role_name).first()
     if user_role:
         raise HTTPException(status_code=400, detail="This role already exists.")
+    if "add_role" not in user_role.permissions:
+        raise HTTPException(status_code=404, detail="You are not allowed to add role.")
     role = User_roles(
         id = uuid.uuid4().hex,
         role_name = role_data.role_name,
@@ -245,12 +273,14 @@ def add_role(role_data: RoleSchema,token: Annotated[str, Depends(oauth2_scheme)]
     }
 
 @router.get("/getroles")
-def get_roles(db: Session = Depends(get_db)):
+def get_roles(token: Annotated[str, Depends(oauth2_scheme)], db: Session = Depends(get_db)):
     return db.query(User_roles).all()
 
 @router.put("/updaterole")
-def update_role(role_id: str, role_data:RoleSchema,token: Annotated[str, Depends(oauth2_scheme)], db: Session = Depends(get_db)):
+def update_role(role_id: str, role_data:RoleSchema, token: Annotated[str, Depends(oauth2_scheme)], db: Session = Depends(get_db)):
     role=db.query(User_roles).filter_by(id=role_id).first()
+    if "update_role" not in role.permissions:
+        raise HTTPException(status_code=404, detail="You are not allowed to update role.")
     if not role:
         raise HTTPException(status_code=400, detail="This role was not found.")
     role.role_name = role_data.role_name
@@ -270,11 +300,7 @@ def update_role(role_id: str, role_data:RoleSchema,token: Annotated[str, Depends
     } 
     
 @router.post("/perm")
-def add_permissions(permission_data: PermissionSchema,token: Annotated[str, Depends(oauth2_scheme)], db: Session = Depends(get_db)):
-    user_permissions = db.query(User_permissions).filter_by(permission_name=permission_data.permission_name).first()
-    if user_permissions:
-        raise HTTPException(status_code=400, detail="This user permission already exists.")
-
+def add_permissions(permission_data: PermissionSchema, token: Annotated[str, Depends(oauth2_scheme)], db: Session = Depends(get_db)):
     user_permissions = User_permissions(
         id=uuid.uuid4().hex,
         permission_name = permission_data.permission_name,
@@ -295,32 +321,8 @@ def add_permissions(permission_data: PermissionSchema,token: Annotated[str, Depe
     }
 
 @router.get("/getperm")
-def get_permissions(db: Session = Depends(get_db)):
+def get_permissions(token: Annotated[str, Depends(oauth2_scheme)], db: Session = Depends(get_db)):
     return db.query(User_permissions).all()
-
-router.put("/updateperm")
-def update_permissions(perm_id: str, perm_data: PermissionSchema, token: Annotated[str, Depends(oauth2_scheme)], db: Session = Depends(get_db)):
-    user_perm = db.query(User_permissions).filter_by(id=perm_id).first()
-
-    if not user_perm:
-        raise HTTPException(status_code=400, detail="This user permission was not found.")
-    
-    user_perm.permission_name = perm_data.permission_name
-    user_perm.permission_type = perm_data.permission_type
-    user_perm.collection = perm_data.collection
-
-    db.add(user_perm)
-    db.commit()
-
-    return {
-            "response": {
-                "code": 200,
-                "status": "success",
-                "alert": [{
-                    "message": f"user permissions id {perm_id} updated."
-                }]
-            }
-    }
 
 @router.put("/updatestatus")
 def update_status(users_data: List[UpdateStatusSchema], bulk: bool, token: Annotated[str, Depends(oauth2_scheme)], db: Session = Depends(get_db)):
@@ -329,6 +331,9 @@ def update_status(users_data: List[UpdateStatusSchema], bulk: bool, token: Annot
             user = db.query(Cms_users).filter_by(id=user_data.id).first()
             if not user:
                 raise HTTPException(status_code=400, detail="user not found.")
+            user_role = db.query(User_roles).filter_by(role_name=user.role).first()
+            if "update_user" not in user_role.permissions:
+                raise HTTPException(status_code=404, detail="You are not allowed to update user.")
              
             user.is_active = user_data.is_active
             user.role = user_data.role
@@ -349,6 +354,9 @@ def update_status(users_data: List[UpdateStatusSchema], bulk: bool, token: Annot
     user = db.query(Cms_users).filter_by(id=users_data[0].id).first()
     if not user:
         raise HTTPException(status_code=400, detail="user not found.")
+    user_role = db.query(User_roles).filter_by(role_name=user.role).first()
+    if "update_user" not in user_role.permissions:
+        raise HTTPException(status_code=404, detail="You are not allowed to update user.")
     
     user.is_active = users_data[0].is_active
     user.role = users_data[0].role

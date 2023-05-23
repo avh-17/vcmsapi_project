@@ -1,5 +1,4 @@
-from pydantic import BaseModel, constr, EmailStr, validator
-from fastapi import HTTPException
+from pydantic import BaseModel, EmailStr, constr, validator
 from typing import List
 from enum import Enum
 
@@ -34,6 +33,12 @@ class CmsBase(BaseModel):
         if value not in [v.value for v in AllowedRoles]:
             raise ValueError(f"Invalid value. Allowed values are {', '.join(v.value for v in AllowedRoles)}.")
         return value
+    
+    @validator('phone')
+    def validate_phone_number(cls, value):
+        if len(value) != 10 or not value.isdigit():
+            raise ValueError("Invalid phone number format")
+        return value
 
 class CmsUpdate(BaseModel):
     first_name: str
@@ -42,6 +47,12 @@ class CmsUpdate(BaseModel):
     emp_id: str = None
     role: str
     phone: str
+
+    @validator('phone')
+    def validate_phone_number(cls, value):
+        if len(value) != 10 or not value.isdigit():
+            raise ValueError("Invalid phone number format")
+        return value
 
 class CmsLogin(BaseModel):
     email: constr(regex=regex)
@@ -71,7 +82,7 @@ class RoleSchema(BaseModel):
 class PermissionSchema(BaseModel):
    permission_name: str
    permission_type: str 
-   collection: List[str]
+   collection: str
    status: bool
 
 class UpdateStatusSchema(BaseModel):
