@@ -4,7 +4,7 @@ from schemas import Settings
 from fastapi_jwt_auth import AuthJWT
 from fastapi_jwt_auth.exceptions import AuthJWTException
 from database import engine, Base
-from router import router as my_router
+from routes import router as my_router
 import uvicorn
 
 Base.metadata.create_all(bind=engine)

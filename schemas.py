@@ -21,18 +21,8 @@ class CmsBase(BaseModel):
     email: constr(regex=regex)
     emp_id: str = None
     password: constr(regex=pass_regex)
-    role: constr(
-        strip_whitespace=True,
-        to_lower=True,
-        regex=f"({'|'.join(v.value for v in AllowedRoles)})",
-    ) = None
+    role: str
     phone: str
-
-    @validator('role')
-    def validate_role(cls, value):
-        if value not in [v.value for v in AllowedRoles]:
-            raise ValueError(f"Invalid value. Allowed values are {', '.join(v.value for v in AllowedRoles)}.")
-        return value
     
     @validator('phone')
     def validate_phone_number(cls, value):
@@ -65,19 +55,9 @@ class EmailSchema(BaseModel):
     email: List[EmailStr]
 
 class RoleSchema(BaseModel):
-    role_name: constr(
-        strip_whitespace=True,
-        to_lower=True,
-        regex=f"({'|'.join(v.value for v in AllowedRoles)})",
-    )
+    role_name: str
     permissions: List[str]
     status: bool
-
-    @validator('role_name')
-    def validate_role(cls, value):
-        if value not in [v.value for v in AllowedRoles]:
-            raise ValueError(f"Invalid value. Allowed values are {', '.join(v.value for v in AllowedRoles)}.")
-        return value
 
 class PermissionSchema(BaseModel):
    permission_name: str
