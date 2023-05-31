@@ -1,15 +1,13 @@
-import uuid, random
+import uuid
 from typing import List
-from datetime import datetime, timedelta
+from datetime import timedelta
 from fastapi import Depends, HTTPException, APIRouter, status
 from fastapi.security import OAuth2PasswordRequestForm
-from jwt import PyJWTError
 from sqlalchemy.orm import Session
-from schemas import CmsBase, CmsUpdate, CmsUpdatePassword, RoleSchema, PermissionSchema, UpdateStatusSchema
-from models import Cms_users, Otp_table, Token, User_roles, User_permissions
-from database import SessionLocal
-from domain import *
 from typing import Annotated
+from models import *
+from schemas import *
+from domain import *
 
 router = APIRouter()
 
@@ -44,14 +42,19 @@ async def login_for_access_token(
     form_data: Annotated[OAuth2PasswordRequestForm, Depends()], db:Session=Depends(get_db)
 ):
     user = db.query(Cms_users).filter(Cms_users.email==form_data.username).first()
-    if not user:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Incorrect username or password",
-            headers={"WWW-Authenticate": "Bearer"},
-        )
-    if not verify_password(form_data.password, user.password):
-        return False
+    if not user or not verify_password(form_data.password, user.password):
+        message = "Incorrect username or password."
+        code = 404
+        return {
+            "response": {
+                "code": code,
+                "status": "failure",
+                "alert": [{
+                    "message": message,
+                    "type": "failure",
+                }],
+            }
+        }
     access_token_expires = timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
     access_token = create_access_token(
         data={"sub": user.email}, expires_delta=access_token_expires
@@ -63,7 +66,19 @@ async def login_for_access_token(
     )
     db.add(token)
     db.commit()
-    return {"access_token": access_token, "token_type": "bearer"}
+    is_data = 1
+    return {
+            "response": {
+                "code": 201,
+                "status": "success",
+                "alert": [{
+                    "message": "Login successful",
+                    "type": "login"
+                }],
+                "data": {"access_token": access_token, "token_type": "bearer"},
+                "is_data": is_data
+            }
+        }
 
 @router.get('/sendotp')
 def send_email_otp(email: str, db: Session = Depends(get_db)):
@@ -79,17 +94,17 @@ def send_email_otp(email: str, db: Session = Depends(get_db)):
                     "message": "Otp sent successfully",
                     "type": "generated"
                 }],
-                "otp": result['otp'],
+                "data": {"otp":result['otp']},
                 "is_data": is_data
             }
         }
    else:
         return {
             "response": {
-                "code": result["code"],
+                "code": 404,
                 "status": "failure",
                 "alert": [{
-                    "message": result["message"],
+                    "message": "Please enter correct email.",
                     "type": "failure",
                 }],
                 "is_data": is_data
@@ -122,9 +137,8 @@ def forgotpassword(user_otp: str, user_data: CmsUpdatePassword, db:Session=Depen
             }
         }
 
-
 @router.get("/users")
-def get_users(token: Annotated[str, Depends(oauth2_scheme)], db: Session = Depends(get_db)):
+def get_users(db: Session = Depends(get_db)):
     users =  db.query(Cms_users).all()
     is_data = 1 if users else 0
     if users:
@@ -154,7 +168,7 @@ def get_users(token: Annotated[str, Depends(oauth2_scheme)], db: Session = Depen
         }
  
 @router.get("/users/{user_id}")
-def get_user(user_id: str, token: Annotated[str, Depends(oauth2_scheme)], db: Session = Depends(get_db)):
+def get_user(user_id: str, db: Session = Depends(get_db)):
     user = db.query(Cms_users).filter(Cms_users.id == user_id).first()
     is_data = 1 if user else 0
     if user is None:
@@ -172,9 +186,12 @@ def get_user(user_id: str, token: Annotated[str, Depends(oauth2_scheme)], db: Se
             "first_name": user.first_name,
             "last_name": user.last_name,
             "email": user.email,
+            "password": user.password,
             "emp_id": user.emp_id,
             "role": user.role,
             "phone": user.phone,
+            "created_at": user.created_at,
+            "updated_at": user.updated_at,
             "email_verified": user.email_verified,
             "phone_verified": user.phone_verified,
             "is_active": user.is_active
@@ -192,7 +209,6 @@ def get_user(user_id: str, token: Annotated[str, Depends(oauth2_scheme)], db: Se
             }
         }
     
-
 @router.delete("/users/{user_id}")
 def del_user(user_id: str, token: Annotated[str, Depends(oauth2_scheme)], db: Session = Depends(get_db)):
     result = delete_user(user_id, db)
@@ -224,13 +240,14 @@ def update_user(bulk: bool, token: Annotated[str, Depends(oauth2_scheme)], users
     if bulk:
         result = update_multiple_users(users_data, db)
         is_data = 1 if result else 0
-        if result:
+        if result['success']:
+        
             return {
                 "response": {
                     "code": 200,
                     "status": "success",
                     "alert": [{
-                        "message": f"user ids {(user_data.id for user_data in users_data)} updated",
+                        "message": f"multiple user ids updated",
                         "type": "Update",
                     }],
                     "data":users_data,
@@ -243,7 +260,7 @@ def update_user(bulk: bool, token: Annotated[str, Depends(oauth2_scheme)], users
                     "code": 404,
                     "status": "Failure",
                     "alert": [{
-                        "message": "User ids not updated.",
+                        "message": f"{result['message']}",
                         "type": "Failure"
                     }],
                     "is_data":is_data
@@ -251,17 +268,17 @@ def update_user(bulk: bool, token: Annotated[str, Depends(oauth2_scheme)], users
             }
         
     result = update_single_user(user_id, user_data, db)
-    is_data = 1 if result else 0
-    if result:
+    is_data = 1 if result['success'] else 0
+    if result['success']:
         return {
             "response": {
                 "code": 200,
                 "status": "success",
                 "alert": [{
-                    "message": f"user id {result.id} updated",
+                    "message": f"user id {result['user'].id} updated",
                     "type": "Update",
                 }],
-                "data":result,
+                "data":result['user'],
                 "is_data":is_data
             }
         }
@@ -271,13 +288,12 @@ def update_user(bulk: bool, token: Annotated[str, Depends(oauth2_scheme)], users
                 "code": 404,
                 "status": "Failure",
                 "alert": [{
-                    "message": f"User id {user_id} not updated.",
+                    "message": f"{result['message']}",
                     "type": "Failure"
                 }],
                 "is_data":is_data
             }
         }
-
 
 @router.put("/verifyuser")
 def verifyuser(user_otp: str, token: Annotated[str, Depends(oauth2_scheme)], db: Session = Depends(get_db)):
@@ -306,7 +322,8 @@ def verifyuser(user_otp: str, token: Annotated[str, Depends(oauth2_scheme)], db:
         }
 
 @router.post("/roles")
-def add_role(role_data: RoleSchema, token: Annotated[str, Depends(oauth2_scheme)], db: Session = Depends(get_db)):
+def add_role(role_data: RoleSchema, db: Session = Depends(get_db)):
+# def add_role(role_data: RoleSchema, token: Annotated[str, Depends(oauth2_scheme)], db: Session = Depends(get_db)):
     result = role_add(role_data,db)
     if result:
         return {
@@ -331,7 +348,7 @@ def add_role(role_data: RoleSchema, token: Annotated[str, Depends(oauth2_scheme)
             }
         }
 
-@router.get("/getroles")
+@router.get("/roles")
 def get_roles(token: Annotated[str, Depends(oauth2_scheme)], db: Session = Depends(get_db)):
     result = db.query(User_roles).all()
     is_data = 1 if result else 0
@@ -362,10 +379,10 @@ def get_roles(token: Annotated[str, Depends(oauth2_scheme)], db: Session = Depen
             }
         }
 
-@router.put("/updaterole")
+@router.put("/roles")
 def update_role(role_id: str, role_data:RoleSchema, token: Annotated[str, Depends(oauth2_scheme)], db: Session = Depends(get_db)):
     result = role_update(role_id, role_data, db)
-    is_data = 1 if result else 0
+    is_data = 1 if result!=None else 0
     if result:
         roles_data = {
                     "role_name": result.role_name,
@@ -390,7 +407,7 @@ def update_role(role_id: str, role_data:RoleSchema, token: Annotated[str, Depend
                 "code": 404,
                 "status": "Failure",
                 "alert": [{
-                    "message": "Role id not found, Or the Role already exists",
+                    "message": "Role id not found.",
                     "type": "Failure"
                 }],
                 "is_data":is_data
@@ -424,7 +441,7 @@ def delete_role(role_id: str,token: Annotated[str, Depends(oauth2_scheme)],db: S
             }
         }
     
-@router.post("/perm")
+@router.post("/permission")
 def add_permissions(permission_data: PermissionSchema, token: Annotated[str, Depends(oauth2_scheme)], db: Session = Depends(get_db)):
     user_permissions = User_permissions(
         id=uuid.uuid4().hex,
@@ -445,7 +462,7 @@ def add_permissions(permission_data: PermissionSchema, token: Annotated[str, Dep
             }
     }
 
-@router.get("/getperm")
+@router.get("/permission")
 def get_permissions(token: Annotated[str, Depends(oauth2_scheme)], db: Session = Depends(get_db)):
     result = db.query(User_permissions).all()
     is_data = 1 if result else 0

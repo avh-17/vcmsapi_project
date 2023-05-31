@@ -21,6 +21,7 @@ class Cms_users(Base):
     created_at = Column(DateTime, default=func.now(), nullable=False)
     updated_at = Column(DateTime, default=None, onupdate=func.now())
     is_active = Column(Boolean, default=False)
+    otp_table = relationship("Otp_table", back_populates="user")
 
 class Token(Base):
     __tablename__ = "tokens"
@@ -36,12 +37,13 @@ class Otp_table(Base):
     id = Column(String, primary_key=True)
     user_id = Column(String, ForeignKey('cms_users.id'), nullable=False)
     phone_code = Column(String, nullable=False)
-    phone_number = Column(String, ForeignKey('cms_users.phone'), nullable=False)
-    email = Column(String, ForeignKey('cms_users.email'), nullable=False)
+    phone_number = Column(String, nullable=False)
+    email = Column(String, nullable=False)
     otp_code = Column(String, nullable=False)
     expiry_date = Column(DateTime)
     no_of_attempts = Column(Integer, nullable=False)
     is_expired = Column(Boolean, nullable=False, default=False)
+    user = relationship("Cms_users", back_populates="otp_table")
 
 class User_roles(Base):
     __tablename__ = "user_roles"

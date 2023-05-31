@@ -18,38 +18,26 @@ class AllowedRoles(str, Enum):
 class CmsBase(BaseModel):
     first_name: str
     last_name: str = None
-    email: constr(regex=regex)
+    email: str
     emp_id: str = None
-    password: constr(regex=pass_regex)
+    password: str
     role: str
     phone: str
-    
-    @validator('phone')
-    def validate_phone_number(cls, value):
-        if len(value) != 10 or not value.isdigit():
-            raise ValueError("Invalid phone number format")
-        return value
 
 class CmsUpdate(BaseModel):
     first_name: str
     last_name: str = None
-    email: constr(regex=regex)
+    email: str
     emp_id: str = None
     role: str
     phone: str
 
-    @validator('phone')
-    def validate_phone_number(cls, value):
-        if len(value) != 10 or not value.isdigit():
-            raise ValueError("Invalid phone number format")
-        return value
-
 class CmsLogin(BaseModel):
-    email: constr(regex=regex)
-    password: constr(regex=pass_regex)
+    email: str
+    password: str
 
 class CmsUpdatePassword(BaseModel):
-    password: constr(regex=pass_regex)
+    password: str
 
 class EmailSchema(BaseModel):
     email: List[EmailStr]

@@ -1,4 +1,4 @@
-import smtplib, uuid, random
+import smtplib, uuid, random,re
 from email.message import EmailMessage
 from fastapi import FastAPI
 from datetime import datetime, timedelta
@@ -48,7 +48,18 @@ def add_user(user: CmsBase, db: Session):
         message = "email | phone no | emp_id already exists."
         code = 409
         return {"success": False, "code": code, "message": message}
-
+    if len(user.phone) != 10 or not user.phone.isdigit():
+        message = "Invalid phone number format, please enter 10 digits."
+        code = 409
+        return {"success": False, "code": code, "message": message}
+    if not re.match(regex, user.email):
+        message = "Invalid email format. Please enter in the format abc@example.com."
+        code = 409
+        return {"success": False, "code": code, "message": message}
+    if not re.match(pass_regex, user.password):
+        message = "Invalid password format. Please enter minimum of 8 characters, 1 uppercase, 1 lowercase, 1 special character and 1 digit."
+        code = 409
+        return {"success": False, "code": code, "message": message}
     db_user = Cms_users(
     id = uuid.uuid4().hex,
     first_name=user.first_name,
@@ -56,11 +67,11 @@ def add_user(user: CmsBase, db: Session):
     email=user.email,
     emp_id=user.emp_id,
     password=get_password_hash(user.password),
-    role=user.role,
+    role=user.role.lower(),
     phone=user.phone
     )
     user_role = db.query(User_roles).filter_by(role_name=db_user.role).first()
-    if user.role=="super_admin" and not user_role.status:
+    if user.role.lower()=="super_admin" and not user_role.status:
         message = "Super admin already exists."
         code = 409
         return {"success": False, "code": code, "message": message}
@@ -92,14 +103,7 @@ def send_otp(email: str, db: Session):
     user = db.query(Cms_users).filter_by(email=email).first()
     if not user:
         return {
-            "response": {
-                "code": 404,
-                "status": "failure",
-                "alert": [{
-                    "message": "User not found",
-                    "type": "failure"
-                }],
-            }
+            'success': False,
         }
 
     otp = random.randint(100000, 999999)
@@ -163,6 +167,10 @@ def verify_user(user_otp: str, db: Session):
 
 def forgot_pass(user_otp: str, user_data: CmsUpdatePassword, db:Session):
     otpuser = db.query(Otp_table).filter(Otp_table.otp_code==user_otp).first()
+    if not otpuser:
+        message = "Enter correct OTP."
+        code = 404
+        return {"success": False, "code": code, "message": message}
     user = db.query(Cms_users).filter(Cms_users.id==otpuser.user_id).first()
     user_role = db.query(User_roles).filter_by(role_name=user.role).first()
     if "update_user" not in user_role.permissions:
@@ -178,6 +186,10 @@ def forgot_pass(user_otp: str, user_data: CmsUpdatePassword, db:Session):
         return {"success": False, "code": code, "message": message}
     
     if user:
+        if not re.match(pass_regex, user.password):
+            message = "Invalid password format. Please enter minimum of 8 characters, 1 uppercase, 1 lowercase, 1 special character and 1 digit."
+            code = 409
+            return {"success": False, "code": code, "message": message}
         user.password = get_password_hash(user_data.password)
         db.add(user)
         db.commit()
@@ -189,10 +201,6 @@ def role_add(role_data: RoleSchema, db: Session):
     user_role = db.query(User_roles).filter_by(role_name=role_data.role_name).first()
     if user_role:
         return False
-    if "add_role" not in user_role.permissions:
-        message = "User role permission denied."
-        code = 400
-        return {"success": False, "code": code, "message": message}
     role = User_roles(
         id = uuid.uuid4().hex,
         role_name = role_data.role_name,
@@ -205,12 +213,12 @@ def role_add(role_data: RoleSchema, db: Session):
 
 def role_update(role_id: str, role_data: RoleSchema, db: Session):
     role=db.query(User_roles).filter_by(id=role_id).first()
+    if not role:
+        return None
     if "update_role" not in role.permissions:
         message = "User role permission denied."
         code = 400
         return {"success": False, "code": code, "message": message}
-    if not role:
-        return None
     role.role_name = role_data.role_name
     role.permissions = role_data.permissions
     role.status = role_data.status
@@ -248,8 +256,13 @@ def update_multiple_users(users_data: List[UpdateStatusSchema], db: Session):
                 message = "User not found"
                 code = 404
                 return {"success": False, "code": code, "message": message}
-            user_role = db.query(User_roles).filter_by(role_name=user.role).first()
-            if "update_user" not in user_role.permissions:
+            user_role = db.query(User_roles).filter_by(role_name=user_data.role).first()
+            if not user_role:
+                message = """Invalid role. Your role can be "super_admin", "admin", "editor", "author", "subscriber" """
+                code = 400
+                return {"success": False, "code": code, "message": message}
+            user_perm = db.query(User_roles).filter_by(role_name=user.role).first()
+            if "update_user" not in user_perm.permissions:
                 message = "User role permission denied."
                 code = 400
                 return {"success": False, "code": code, "message": message}
@@ -260,34 +273,47 @@ def update_multiple_users(users_data: List[UpdateStatusSchema], db: Session):
             db.add(user)
             db.commit()         
 
-    return True
+    return {"success": True}
 
 def update_single_user(user_id: str, user_data: CmsUpdate, db: Session):
     user = db.query(Cms_users).filter(Cms_users.id == user_id).first()
-    user_otp = db.query(Otp_table).filter(user.id == Otp_table.user_id).first()
     if user is None:
         message = "User not found"
         code = 404
         return {"success": False, "code": code, "message": message}
+    user_otp = db.query(Otp_table).filter(Otp_table.user_id == user.id).first()
     
-    user_role = db.query(User_roles).filter_by(role_name=user.role).first()
-    if "update_user" not in user_role.permissions:
+    user_role = db.query(User_roles).filter_by(role_name=user_data.role).first()
+    if not user_role:
+        message = """Invalid role. Your role can be "super_admin", "admin", "editor", "author", "subscriber" """
+        code = 400
+        return {"success": False, "code": code, "message": message}
+    user_perm = db.query(User_roles).filter_by(role_name=user.role).first()
+    if "update_user" not in user_perm.permissions:
         message = "User role permission denied."
         code = 400
         return {"success": False, "code": code, "message": message}
-    
     if user_otp:
-        db.delete(user_otp)
-        db.commit
+        user_otp.phone_number = user_data.phone
+        user_otp.email = user_data.email
+        db.commit()
     user.first_name=user_data.first_name,
     user.last_name=user_data.last_name,
+    if not re.match(regex, user_data.email):
+        message = "Invalid email format. Please enter in the format abc@example.com."
+        code = 409
+        return {"success": False, "code": code, "message": message}
     user.email=user_data.email,
     user.emp_id=user_data.emp_id,
-    if user.role and not user_role.status:
+    if user_data.role.lower()=="super_admin" and not user_role.status:
         message = "Super admin user role already taken."
         code = 404
         return {"success": False, "code": code, "message": message}
     user.role=user_data.role,
+    if len(user.phone) != 10 or not user.phone.isdigit():
+        message = "Invalid phone number format, please enter 10 digits."
+        code = 409
+        return {"success": False, "code": code, "message": message}
     user.phone=user_data.phone,
     if user_role.role_name=="super_admin":
         user_role.status=False
@@ -295,7 +321,7 @@ def update_single_user(user_id: str, user_data: CmsUpdate, db: Session):
         db.commit()
     db.add(user)
     db.commit()
-    return user
+    return {"success": True, "user": user}
 
 def role_delete(role_id:str, db:Session):
     role = db.query(User_roles).get(role_id)
@@ -315,8 +341,6 @@ def create_access_token(data: dict, expires_delta: timedelta | None = None):
     to_encode.update({"exp": expire})
     encoded_jwt = jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM)
     return encoded_jwt
-
-app = FastAPI()
 
 def send_email(subject: str,body: str,sender_email: str,recipient_email: str):
     msg = EmailMessage()
